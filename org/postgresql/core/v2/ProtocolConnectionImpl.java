@@ -225,6 +225,16 @@ class ProtocolConnectionImpl implements ProtocolConnection {
         closed = true;
     }
 
+    public void addNetworkObserver(StreamObserver observer)
+    {
+        pgStream.addObserver(observer);
+    }
+
+    public void removeNetworkObserver(StreamObserver observer)
+    {
+        pgStream.removeObserver(observer);
+    }
+
     private String serverVersion;
     private int cancelPid;
     private int cancelKey;

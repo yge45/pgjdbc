@@ -17,6 +17,8 @@ import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.LinkedList;
 
 import org.postgresql.util.GT;
 import org.postgresql.util.HostSpec;
@@ -45,6 +47,10 @@ public class PGStream
     private Encoding encoding;
     private Writer encodingWriter;
 
+    private Collection<StreamObserver> observers;
+    private Collection<StreamObserver> currentlyNotifiedObservers;
+    private int observerRecursion = 0;
+
     /**
      * Constructor:  Connect to the PostgreSQL back end and return
      * a stream connection.
@@ -64,6 +70,8 @@ public class PGStream
 
         _int2buf = new byte[2];
         _int4buf = new byte[4];
+
+        observers = new LinkedList<StreamObserver>();
     }
 
     /**
@@ -179,7 +187,15 @@ public class PGStream
      */
     public void SendChar(int val) throws IOException
     {
-        pg_output.write(val);
+        notifyObserversBegin();
+        try
+        {
+            pg_output.write(val);
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -190,11 +206,19 @@ public class PGStream
      */
     public void SendInteger4(int val) throws IOException
     {
-        _int4buf[0] = (byte)(val >>> 24);
-        _int4buf[1] = (byte)(val >>> 16);
-        _int4buf[2] = (byte)(val >>> 8);
-        _int4buf[3] = (byte)(val);
-        pg_output.write(_int4buf);
+        notifyObserversBegin();
+        try
+        {
+            _int4buf[0] = (byte)(val >>> 24);
+            _int4buf[1] = (byte)(val >>> 16);
+            _int4buf[2] = (byte)(val >>> 8);
+            _int4buf[3] = (byte)(val);
+            pg_output.write(_int4buf);
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -205,12 +229,20 @@ public class PGStream
      */
     public void SendInteger2(int val) throws IOException
     {
-        if (val < Short.MIN_VALUE || val > Short.MAX_VALUE)
-            throw new IOException("Tried to send an out-of-range integer as a 2-byte value: " + val);
-
-        _int2buf[0] = (byte)(val >>> 8);
-        _int2buf[1] = (byte)val;
-        pg_output.write(_int2buf);
+        notifyObserversBegin();
+        try
+        {
+            if (val < Short.MIN_VALUE || val > Short.MAX_VALUE)
+                throw new IOException("Tried to send an out-of-range integer as a 2-byte value: " + val);
+    
+            _int2buf[0] = (byte)(val >>> 8);
+            _int2buf[1] = (byte)val;
+            pg_output.write(_int2buf);
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -221,7 +253,15 @@ public class PGStream
      */
     public void Send(byte buf[]) throws IOException
     {
-        pg_output.write(buf);
+        notifyObserversBegin();
+        try
+        {
+            pg_output.write(buf);
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -248,11 +288,19 @@ public class PGStream
      */
     public void Send(byte buf[], int off, int siz) throws IOException
     {
-	int bufamt = buf.length - off;
-        pg_output.write(buf, off, bufamt < siz ? bufamt : siz);
-        for (int i = bufamt ; i < siz ; ++i)
+        notifyObserversBegin();
+        try
         {
-            pg_output.write(0);
+            int bufamt = buf.length - off;
+            pg_output.write(buf, off, bufamt < siz ? bufamt : siz);
+            for (int i = bufamt ; i < siz ; ++i)
+            {
+                pg_output.write(0);
+            }
+        }
+        finally
+        {
+            notifyObserversEnd();
         }
     }
 
@@ -265,10 +313,18 @@ public class PGStream
      */
     public int PeekChar() throws IOException
     {
-        int c = pg_input.peek();
-        if (c < 0)
-            throw new EOFException();
-        return c;
+        notifyObserversBegin();
+        try
+        {
+            int c = pg_input.peek();
+            if (c < 0)
+                throw new EOFException();
+            return c;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -279,10 +335,18 @@ public class PGStream
      */
     public int ReceiveChar() throws IOException
     {
-        int c = pg_input.read();
-        if (c < 0)
-            throw new EOFException();
-        return c;
+        notifyObserversBegin();
+        try
+        {
+            int c = pg_input.read();
+            if (c < 0)
+                throw new EOFException();
+            return c;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -293,10 +357,18 @@ public class PGStream
      */
     public int ReceiveInteger4() throws IOException
     {
-        if (pg_input.read(_int4buf) != 4)
-            throw new EOFException();
-
-        return (_int4buf[0] & 0xFF) << 24 | (_int4buf[1] & 0xFF) << 16 | (_int4buf[2] & 0xFF) << 8 | _int4buf[3] & 0xFF;
+        notifyObserversBegin();
+        try
+        {
+            if (pg_input.read(_int4buf) != 4)
+                throw new EOFException();
+    
+            return (_int4buf[0] & 0xFF) << 24 | (_int4buf[1] & 0xFF) << 16 | (_int4buf[2] & 0xFF) << 8 | _int4buf[3] & 0xFF;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -307,10 +379,18 @@ public class PGStream
      */
     public int ReceiveInteger2() throws IOException
     {
-        if (pg_input.read(_int2buf) != 2)
-            throw new EOFException();
-
-        return (_int2buf[0] & 0xFF) << 8 | _int2buf[1] & 0xFF;
+        notifyObserversBegin();
+        try
+        {
+            if (pg_input.read(_int2buf) != 2)
+                throw new EOFException();
+    
+            return (_int2buf[0] & 0xFF) << 8 | _int2buf[1] & 0xFF;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -319,15 +399,24 @@ public class PGStream
      * @param len the length of the string to receive, in bytes.
      * @return the decoded string
      */
-    public String ReceiveString(int len) throws IOException {
-        if (!pg_input.ensureBytes(len)) {
-            throw new EOFException();
+    public String ReceiveString(int len) throws IOException
+    {
+        notifyObserversBegin();
+        try
+        {
+            if (!pg_input.ensureBytes(len)) {
+                throw new EOFException();
+            }
+    
+            String res = encoding.decode(pg_input.getBuffer(), pg_input.getIndex(),
+                                         len);
+            pg_input.skip(len);
+            return res;
         }
-
-        String res = encoding.decode(pg_input.getBuffer(), pg_input.getIndex(),
-                                     len);
-        pg_input.skip(len);
-        return res;
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -339,11 +428,19 @@ public class PGStream
      */
     public String ReceiveString() throws IOException
     {
-        int len = pg_input.scanCStringLength();
-        String res = encoding.decode(pg_input.getBuffer(), pg_input.getIndex(),
-                                     len - 1);
-        pg_input.skip(len);
-        return res;
+        notifyObserversBegin();
+        try
+        {
+            int len = pg_input.scanCStringLength();
+            String res = encoding.decode(pg_input.getBuffer(), pg_input.getIndex(),
+                                         len - 1);
+            pg_input.skip(len);
+            return res;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -446,9 +543,17 @@ public class PGStream
      */
     public byte[] Receive(int siz) throws IOException
     {
-        byte[] answer = new byte[siz];
-        Receive(answer, 0, siz);
-        return answer;
+        notifyObserversBegin();
+        try
+        {
+            byte[] answer = new byte[siz];
+            Receive(answer, 0, siz);
+            return answer;
+        }
+        finally
+        {
+            notifyObserversEnd();
+        }
     }
 
     /**
@@ -461,21 +566,38 @@ public class PGStream
      */
     public void Receive(byte[] buf, int off, int siz) throws IOException
     {
-        int s = 0;
-
-        while (s < siz)
+        notifyObserversBegin();
+        try
         {
-            int w = pg_input.read(buf, off + s, siz - s);
-            if (w < 0)
-                throw new EOFException();
-            s += w;
+            int s = 0;
+    
+            while (s < siz)
+            {
+                int w = pg_input.read(buf, off + s, siz - s);
+                if (w < 0)
+                    throw new EOFException();
+                s += w;
+            }
+        }
+        finally
+        {
+            notifyObserversEnd();
         }
     }
 
-    public void Skip(int size) throws IOException {
-        long s = 0;
-        while (s < size) {
-            s += pg_input.skip(size - s);
+    public void Skip(int size) throws IOException
+    {
+        notifyObserversBegin();
+        try
+        {
+            long s = 0;
+            while (s < size) {
+                s += pg_input.skip(size - s);
+            }
+        }
+        finally
+        {
+            notifyObserversEnd();
         }
     }
 
@@ -557,4 +679,53 @@ public class PGStream
         pg_input.close();
         connection.close();
     }
+
+    public void addObserver(StreamObserver observer)
+    {
+        // do not touch to the current list, it may be 'currentlyNotifiedObservers'
+        observers = new LinkedList<StreamObserver>(observers);
+        observers.add(observer);
+    }
+
+    public void removeObserver(StreamObserver observer)
+    {
+        // do not touch to the current list, it may be 'currentlyNotifiedObservers'
+        observers = new LinkedList<StreamObserver>(observers);
+        observers.remove(observer);
+    }
+
+    private void notifyObserversBegin()
+    {
+        if (observerRecursion == 0)
+        {
+            currentlyNotifiedObservers = observers;
+            for (StreamObserver observer : currentlyNotifiedObservers)
+            {
+                observer.startOperation(this);
+            }
+        }
+        observerRecursion++;
+    }
+
+    private void notifyObserversEnd()
+    {
+        observerRecursion--;
+        if (observerRecursion == 0)
+        {
+            for (StreamObserver observer : currentlyNotifiedObservers)
+            {
+                // notifyObserversEnd is usually in a finally sentence
+                // do not let any observer hide a thrown exception in the try block
+                try
+                {
+                    observer.endOperation(this);
+                }
+                catch (Exception e)
+                {
+                }
+            }
+            currentlyNotifiedObservers = null;
+        }
+    }
+
 }

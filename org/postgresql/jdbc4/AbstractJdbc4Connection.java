@@ -13,8 +13,10 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Properties;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 import org.postgresql.core.Oid;
+import org.postgresql.core.StreamObserver;
 import org.postgresql.core.Utils;
 import org.postgresql.core.TypeInfo;
 import org.postgresql.util.GT;
@@ -26,8 +28,14 @@ import org.postgresql.jdbc2.AbstractJdbc2Array;
 abstract class AbstractJdbc4Connection extends org.postgresql.jdbc3g.AbstractJdbc3gConnection
 {
     private static final SQLPermission SQL_PERMISSION_ABORT = new SQLPermission("callAbort");
+    private static final SQLPermission SQL_PERMISSION_NETWORK_TIMEOUT = new SQLPermission("setNetworkTimeout");
 
     private final Properties _clientInfo;
+
+    private int _networkTimeout = 0;
+    private Executor _networkTimeoutExecutor;
+    private NetworkTimeoutCommand _networkTimeoutCommand;
+    private NetworkTimeoutObserver _networkTimeoutObserver;
 
     public AbstractJdbc4Connection(HostSpec[] hostSpecs, String user, String database, Properties info, String url) throws SQLException {
         super(hostSpecs, user, database, info, url);
@@ -121,28 +129,28 @@ abstract class AbstractJdbc4Connection extends org.postgresql.jdbc3g.AbstractJdb
         if (isClosed()) {
             return false;
         }
-    	if (timeout < 0) {
+        if (timeout < 0) {
             throw new PSQLException(GT.tr("Invalid timeout ({0}<0).", timeout), PSQLState.INVALID_PARAMETER_VALUE);
         }
-    	boolean valid = false;
+        boolean valid = false;
         Statement stmt = null;
-		ResultSet rs;
-    	try {
-    		if (!isClosed()) {
-            	stmt = createStatement();
-            	stmt.setQueryTimeout( timeout );
-            	rs = stmt.executeQuery( "SELECT 1" );
-				rs.close();
-            	valid = true;
-    	    }
-    	}
-    	catch ( SQLException e) {
-    		getLogger().log(GT.tr("Validating connection."),e);
-    	}
-    	finally
-    	{
-    		if(stmt!=null) try {stmt.close();}catch(Exception ex){}
-    	}
+        ResultSet rs;
+        try {
+            if (!isClosed()) {
+                stmt = createStatement();
+                stmt.setQueryTimeout( timeout );
+                rs = stmt.executeQuery( "SELECT 1" );
+                rs.close();
+                valid = true;
+            }
+        }
+        catch ( SQLException e) {
+            getLogger().log(GT.tr("Validating connection."),e);
+        }
+        finally
+        {
+            if(stmt!=null) try {stmt.close();}catch(Exception ex){}
+        }
         return valid;    
 }
 
@@ -305,12 +313,47 @@ abstract class AbstractJdbc4Connection extends org.postgresql.jdbc3g.AbstractJdb
         }
     }
 
-    public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException {
-        throw org.postgresql.Driver.notImplemented(this.getClass(), "setNetworkTimeout(Executor, int)");
+    public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException
+    {
+        checkClosed();
+
+        SQL_PERMISSION_NETWORK_TIMEOUT.checkGuard(this);
+
+        if (milliseconds < 0)
+        {
+            throw new PSQLException(GT.tr("Invalid timeout ({0}<0).", milliseconds), PSQLState.INVALID_PARAMETER_VALUE);
+        }
+
+        _networkTimeout = milliseconds;
+        if (_networkTimeout == 0)
+        {
+            if (_networkTimeoutObserver != null)
+            {
+                removeNetworkObserver(_networkTimeoutObserver);
+                _networkTimeoutObserver = null;
+            }
+            _networkTimeoutExecutor = null;
+        }
+        else
+        {
+            if (executor == null)
+            {
+                throw new PSQLException(GT.tr("Executor must be non-null when timeout is positive"), PSQLState.INVALID_PARAMETER_VALUE);
+            }
+
+            _networkTimeoutExecutor = executor;
+            if (_networkTimeoutObserver == null)
+            {
+                _networkTimeoutObserver = new NetworkTimeoutObserver();
+                addNetworkObserver(_networkTimeoutObserver);
+            }
+        }
     }
 
-    public int getNetworkTimeout() throws SQLException {
-        throw org.postgresql.Driver.notImplemented(this.getClass(), "getNetworkTimeout()");
+    public int getNetworkTimeout() throws SQLException
+    {
+        checkClosed();
+        return _networkTimeout;
     }
 
     public class AbortCommand implements Runnable
@@ -318,6 +361,80 @@ abstract class AbstractJdbc4Connection extends org.postgresql.jdbc3g.AbstractJdb
         public void run()
         {
             abort();
+        }
+    }
+
+    public class NetworkTimeoutCommand extends AbortCommand
+    {
+        private boolean _cancelled = false;
+        private long _startTime;
+
+        public NetworkTimeoutCommand()
+        {
+            _startTime = System.currentTimeMillis();
+        }
+        
+        public synchronized void run()
+        {
+            // we don't know when the executor will schedule the command
+            // it may be already outdated
+            if (!_cancelled)
+            {
+                try
+                {
+                    // take into account time already spent in the executor queue
+                    long elapsed = System.currentTimeMillis() - _startTime;
+                    long remaining = _networkTimeout - elapsed;
+                    if (remaining >= 0)
+                    {
+                        wait(_networkTimeout);
+                    }
+                    if (!_cancelled && _networkTimeoutCommand == this)
+                    {
+                        super.run();
+                    }
+                }
+                catch (InterruptedException e)
+                {
+                    return;
+                }
+            }
+        }
+
+        public synchronized void cancelTask()
+        {
+            _cancelled = true;
+            notify();
+        }
+    }
+
+    public class NetworkTimeoutObserver implements StreamObserver
+    {
+        public void startOperation(Object ioObject)
+        {
+            _networkTimeoutCommand = new NetworkTimeoutCommand();
+            if (_networkTimeoutExecutor != null)
+            {
+                try
+                {
+                    _networkTimeoutExecutor.execute(_networkTimeoutCommand);
+                }
+                catch (RejectedExecutionException e)
+                {
+                    // the executor is probably shutting down
+                    // we do not want to get this exception at each network call
+                    _networkTimeoutExecutor = null;
+                }
+            }
+        }
+
+        public void endOperation(Object ioObject)
+        {
+            if (_networkTimeoutCommand != null)
+            {
+                _networkTimeoutCommand.cancelTask();
+            }
+            _networkTimeoutCommand = null;
         }
     }
 
