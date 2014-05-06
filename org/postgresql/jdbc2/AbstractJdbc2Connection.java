@@ -1273,4 +1273,19 @@ public abstract class AbstractJdbc2Connection implements BaseConnection
     {
         this.disableColumnSanitiser = disableColumnSanitiser;
     }
+
+    protected void addNetworkObserver(StreamObserver observer)
+    {
+        protoConnection.addNetworkObserver(observer);
+    }
+
+    protected void removeNetworkObserver(StreamObserver observer)
+    {
+        protoConnection.removeNetworkObserver(observer);
+    }
+
+    protected void abort()
+    {
+       protoConnection.abort();
+    }
 }

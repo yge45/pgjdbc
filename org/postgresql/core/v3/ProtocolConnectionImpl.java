@@ -222,6 +222,28 @@ class ProtocolConnectionImpl implements ProtocolConnection {
         return integerDateTimes;
     }
 
+    public void abort() {
+        try
+        {
+            pgStream.getSocket().close();
+        }
+        catch (IOException e)
+        {
+            // ignore
+        }
+        closed = true;
+    }
+
+    public void addNetworkObserver(StreamObserver observer)
+    {
+        pgStream.addObserver(observer);
+    }
+
+    public void removeNetworkObserver(StreamObserver observer)
+    {
+        pgStream.removeObserver(observer);
+    }
+
    /**
      * True if server uses integers for date and time fields. False if
      * server uses double.
