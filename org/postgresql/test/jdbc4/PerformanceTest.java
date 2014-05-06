@@ -8,7 +8,10 @@
 package org.postgresql.test.jdbc4;
 
 import java.sql.*;
+import java.util.concurrent.Executors;
+
 import junit.framework.TestCase;
+
 import org.postgresql.test.TestUtil;
 
 public class PerformanceTest extends TestCase
@@ -35,6 +38,7 @@ public class PerformanceTest extends TestCase
 
     public void testTonsOfSelect() throws SQLException
     {
+        _conn.setNetworkTimeout(Executors.newSingleThreadExecutor(), 60000);
         long startInsert = System.currentTimeMillis();
         Statement stmt = _conn.createStatement();
         for (int i = 0; i < 1000; i++)
