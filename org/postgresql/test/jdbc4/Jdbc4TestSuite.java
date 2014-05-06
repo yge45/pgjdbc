@@ -33,6 +33,7 @@ public class Jdbc4TestSuite extends TestSuite
         suite.addTestSuite(WrapperTest.class);
         suite.addTestSuite(BinaryTest.class);
         suite.addTestSuite(IsValidTest.class);
+        suite.addTestSuite(PerformanceTest.class);
 
         Connection connection = TestUtil.openDB();
         try
