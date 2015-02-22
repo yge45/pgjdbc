@@ -32,7 +32,7 @@ matrix:
         postgresql: "9.2"
     - jdk: oraclejdk8
       addons:
-        postgresql: "9.3"
+        postgresql: "9.2"
     - jdk: openjdk7
       addons:
         postgresql: "9.3"
@@ -45,3 +45,15 @@ matrix:
     - jdk: oraclejdk8
       addons:
         postgresql: "9.3"
+    - jdk: openjdk7
+      addons:
+        postgresql: "9.4"
+    - jdk: openjdk6
+      addons:
+        postgresql: "9.4"
+    - jdk: oraclejdk7
+      addons:
+        postgresql: "9.4"
+    - jdk: oraclejdk8
+      addons:
+        postgresql: "9.4"
