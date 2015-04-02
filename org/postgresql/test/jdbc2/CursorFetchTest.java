@@ -365,6 +365,58 @@ public class CursorFetchTest extends TestCase
         }
     }
 
+    public void testAnotherMultiRowResultPositioning() throws Exception
+    {
+        String msg;
+        
+        int rowCount = 4;
+        createRows(rowCount);
+        
+        int[] sizes = { 2, 3 };
+        for (int i = 0; i < sizes.length; ++i)
+        {
+            Statement stmt = con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_UPDATABLE);
+            stmt.setFetchSize(sizes[i]);
+            
+            ResultSet rs = stmt.executeQuery("select * from test_fetch order by value");
+            msg = "before-first row positioning error with fetchsize=" + sizes[i];
+            assertTrue(msg, rs.isBeforeFirst());
+            assertTrue(msg, !rs.isAfterLast());
+            assertTrue(msg, !rs.isFirst());
+            assertTrue(msg, !rs.isLast());
+            
+            for (int j = 0; j < rowCount; ++j)
+            {
+                msg = "row " + j + " positioning error with fetchsize=" + sizes[i];
+                assertTrue(msg, rs.next());
+                assertEquals(msg, j, rs.getInt(1));
+                
+                assertTrue(msg, !rs.isBeforeFirst());
+                assertTrue(msg, !rs.isAfterLast());
+                if (j == 0)
+                    assertTrue(msg, rs.isFirst());
+                else
+                    assertTrue(msg, !rs.isFirst());
+                
+                if (j == rowCount - 1)
+                    assertTrue(msg, rs.isLast());
+                else
+                    assertTrue(msg, !rs.isLast());
+            }
+            
+            msg = "after-last row positioning error with fetchsize=" + sizes[i];
+            assertTrue(msg, !rs.next());
+            
+            assertTrue(msg, !rs.isBeforeFirst());
+            assertTrue(msg, rs.isAfterLast());
+            assertTrue(msg, !rs.isFirst());
+            assertTrue(msg, !rs.isLast());
+            
+            rs.close();
+            stmt.close();
+        }
+    }
+
     // Test odd queries that should not be transformed into cursor-based fetches.
     public void testInsert() throws Exception
     {
